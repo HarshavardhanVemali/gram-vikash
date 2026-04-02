@@ -14,7 +14,13 @@ Solution: Use Gemini's BUILT-IN server-side VAD (automatic_activity_detection en
 This matches how the official Google examples actually work in production.
 """
 
-import os, json, base64, asyncio, logging, math, struct, time
+import os
+import json
+import base64
+import asyncio
+import logging
+import math
+import struct
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
@@ -28,13 +34,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 log = logging.getLogger("voicebot")
 
-app    = FastAPI(title="Gram Vikash VoiceBot")
+app = FastAPI(title="Gram Vikash VoiceBot")
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"), http_options={"api_version": "v1alpha"})
-MODEL  = "gemini-2.5-flash-native-audio-preview-12-2025"
+MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
 # Barge-in: how many loud chunks before we consider it intentional interruption
-BARGE_THRESHOLD  = int(os.getenv("BARGE_THRESHOLD",  "600"))  # RMS energy
-BARGE_CONFIRM    = int(os.getenv("BARGE_CONFIRM",    "3"))    # consecutive chunks
+BARGE_THRESHOLD = int(os.getenv("BARGE_THRESHOLD", "600"))  # RMS energy
+BARGE_CONFIRM = int(os.getenv("BARGE_CONFIRM", "3"))    # consecutive chunks
 
 LANGUAGE_PROFILES = {
     "tenglish": {
@@ -53,6 +59,7 @@ LANGUAGE_PROFILES = {
         "instruction": "Clear simple English. 2-3 sentences. Warm and brief.",
     },
 }
+
 
 def build_system_prompt(language, greeting, context):
     p = LANGUAGE_PROFILES.get(language, LANGUAGE_PROFILES["tenglish"])
@@ -77,31 +84,36 @@ HISTORY:
 {context}
 """
 
+
 @dataclass
 class Session:
-    stream_sid: Optional[str]  = None
-    language: str              = "tenglish"
-    topic: Optional[str]       = None
-    user_name: Optional[str]   = None
-    turn_count: int            = 0
-    history: deque             = field(default_factory=lambda: deque(maxlen=14))
+    stream_sid: Optional[str] = None
+    language: str = "tenglish"
+    topic: Optional[str] = None
+    user_name: Optional[str] = None
+    turn_count: int = 0
+    history: deque = field(default_factory=lambda: deque(maxlen=14))
 
     # Barge-in tracking only (no manual VAD)
-    loud_streak: int           = 0
-    bot_speaking: bool         = False
+    loud_streak: int = 0
+    bot_speaking: bool = False
 
     # Stats
-    audio_in: int              = 0
-    audio_out: int             = 0
+    audio_in: int = 0
+    audio_out: int = 0
 
     def add(self, speaker, text):
-        self.history.append(f"{speaker.upper()}: {text}"); self.turn_count += 1
+        self.history.append(f"{speaker.upper()}: {text}")
+        self.turn_count += 1
 
     def context(self):
         lines = []
-        if self.user_name: lines.append(f"User: {self.user_name}")
-        if self.topic:     lines.append(f"Topic: {self.topic}")
-        if lines:          lines.append("---")
+        if self.user_name:
+            lines.append(f"User: {self.user_name}")
+        if self.topic:
+            lines.append(f"Topic: {self.topic}")
+        if lines:
+            lines.append("---")
         return "\n".join(lines + (list(self.history) or ["No history — greet the user now."]))
 
     def greeting(self):
@@ -112,51 +124,70 @@ class Session:
 
 
 def compute_rms(pcm):
-    if len(pcm) < 2: return 0.0
-    if len(pcm) % 2: pcm = pcm[:-1]
+    if len(pcm) < 2:
+        return 0.0
+    if len(pcm) % 2:
+        pcm = pcm[:-1]
     n = len(pcm) // 2
     s = struct.unpack(f"<{n}h", pcm)
-    return math.sqrt(sum(x*x for x in s) / n)
+    return math.sqrt(sum(x * x for x in s) / n)
+
 
 def up_8k_to_16k(pcm):
-    if len(pcm) % 2: pcm += b'\x00'
-    return b"".join(pcm[i:i+2] * 2 for i in range(0, len(pcm), 2))
+    if len(pcm) % 2:
+        pcm += b'\x00'
+    return b"".join(pcm[i:i + 2] * 2 for i in range(0, len(pcm), 2))
+
 
 def down_24k_to_8k(pcm):
-    if len(pcm) % 2: pcm += b'\x00'
-    return b"".join(pcm[i:i+2] for i in range(0, len(pcm), 6))
+    if len(pcm) % 2:
+        pcm += b'\x00'
+    return b"".join(pcm[i:i + 2] for i in range(0, len(pcm), 6))
+
 
 def down_16k_to_8k(pcm):
-    if len(pcm) % 2: pcm += b'\x00'
-    return b"".join(pcm[i:i+2] for i in range(0, len(pcm), 4))
+    if len(pcm) % 2:
+        pcm += b'\x00'
+    return b"".join(pcm[i:i + 2] for i in range(0, len(pcm), 4))
+
 
 TELUGU_CHARS = set("అఆఇఈఉఊఎఏఐఒఓఔంఃకఖగఘచఛజఝటఠడఢణతథదనపఫబభమయరలవశషసహళఱౌై")
-HINDI_CHARS  = set("अआइईउऊएऐओऔकखगघचछजझटठडढणतथदधनपफबभमयरलवशषसहािीुूेैोौंः")
+HINDI_CHARS = set("अआइईउऊएऐओऔकखगघचछजझटठडढणतथदधनपफबभमयरलवशषसहािीुूेैोौंः")
+
 
 def detect_lang(text):
     n = len(text) or 1
-    if sum(c in TELUGU_CHARS for c in text) / n > 0.05: return "tenglish"
-    if sum(c in HINDI_CHARS  for c in text) / n > 0.05: return "hinglish"
+    if sum(c in TELUGU_CHARS for c in text) / n > 0.05:
+        return "tenglish"
+    if sum(c in HINDI_CHARS for c in text) / n > 0.05:
+        return "hinglish"
     words = text.lower().split()
-    t = sum(1 for w in words if w in {"nenu","meeru","endi","ela","panta","vaan","unnaru","ledhu","manchidi"})
-    h = sum(1 for w in words if w in {"main","mujhe","aap","kya","hai","nahi","kheti","baarish","mandi","hoon"})
-    if t > h: return "tenglish"
-    if h > 0: return "hinglish"
+    t = sum(1 for w in words if w in {"nenu", "meeru", "endi", "ela", "panta", "vaan", "unnaru", "ledhu", "manchidi"})
+    h = sum(1 for w in words if w in {"main", "mujhe", "aap", "kya",
+            "hai", "nahi", "kheti", "baarish", "mandi", "hoon"})
+    if t > h:
+        return "tenglish"
+    if h > 0:
+        return "hinglish"
     return "english"
 
+
 TOPICS = {
-    "rainfall":      ["rain","baarish","varsha","weather","forecast","vaan"],
-    "market_prices": ["price","rate","mandi","market","msp","keemat","dhar"],
-    "farming_tips":  ["crop","seed","fertilizer","pest","sow","harvest","panta","irrigation","rabi","kharif"],
-    "government":    ["scheme","pm-kisan","kisan","insurance","subsidy","yojana","loan","rythu","bandhu"],
-    "soil":          ["soil","mitti","ph","nutrient","compost","urea","dap","npk"],
+    "rainfall": ["rain", "baarish", "varsha", "weather", "forecast", "vaan"],
+    "market_prices": ["price", "rate", "mandi", "market", "msp", "keemat", "dhar"],
+    "farming_tips": ["crop", "seed", "fertilizer", "pest", "sow", "harvest", "panta", "irrigation", "rabi", "kharif"],
+    "government": ["scheme", "pm-kisan", "kisan", "insurance", "subsidy", "yojana", "loan", "rythu", "bandhu"],
+    "soil": ["soil", "mitti", "ph", "nutrient", "compost", "urea", "dap", "npk"],
 }
+
 
 def detect_topic(text):
     tl = text.lower()
     for topic, kws in TOPICS.items():
-        if any(k in tl for k in kws): return topic
+        if any(k in tl for k in kws):
+            return topic
     return None
+
 
 def gemini_config(sess):
     """
@@ -197,12 +228,14 @@ async def voicebot(websocket: WebSocket):
                         try:
                             raw = await asyncio.wait_for(websocket.receive_text(), timeout=30)
                         except asyncio.TimeoutError:
-                            try: await websocket.send_json({"event": "ping"})
-                            except Exception: stop.set()
+                            try:
+                                await websocket.send_json({"event": "ping"})
+                            except Exception:
+                                stop.set()
                             continue
 
                         msg = json.loads(raw)
-                        ev  = msg.get("event")
+                        ev = msg.get("event")
 
                         if ev == "start":
                             sess.stream_sid = msg["start"].get("stream_sid")
@@ -230,7 +263,7 @@ async def voicebot(websocket: WebSocket):
                             if not sess.stream_sid:
                                 sess.stream_sid = msg.get("stream_sid")
 
-                            raw8k  = base64.b64decode(msg["media"]["payload"])
+                            raw8k = base64.b64decode(msg["media"]["payload"])
                             sess.audio_in += 1
                             energy = compute_rms(raw8k)
 
@@ -241,7 +274,7 @@ async def voicebot(websocket: WebSocket):
                                     if sess.loud_streak >= BARGE_CONFIRM:
                                         log.info(f"BARGE-IN (rms={energy:.0f})")
                                         sess.bot_speaking = False
-                                        sess.loud_streak  = 0
+                                        sess.loud_streak = 0
                                 else:
                                     sess.loud_streak = 0
 
@@ -253,7 +286,8 @@ async def voicebot(websocket: WebSocket):
                                 )
                             except Exception as e:
                                 log.error(f"Audio forward error: {e}")
-                                stop.set(); break
+                                stop.set()
+                                break
 
                             if sess.audio_in % 200 == 0:
                                 log.info(f"Stats | in={sess.audio_in} out={sess.audio_out} "
@@ -261,51 +295,59 @@ async def voicebot(websocket: WebSocket):
 
                         elif ev == "dtmf":
                             digit = msg.get("dtmf", {}).get("digit", "")
-                            lmap = {"1":"tenglish","2":"hinglish","3":"english"}
+                            lmap = {"1": "tenglish", "2": "hinglish", "3": "english"}
                             if digit in lmap:
                                 sess.language = lmap[digit]
                                 log.info(f"Language → {sess.language} (DTMF)")
 
                         elif ev == "text":
-                            t = msg.get("text","").strip()
+                            t = msg.get("text", "").strip()
                             if t:
                                 dl = detect_lang(t)
-                                if dl != sess.language: sess.language = dl
-                                if detect_topic(t): sess.topic = detect_topic(t)
+                                if dl != sess.language:
+                                    sess.language = dl
+                                if detect_topic(t):
+                                    sess.topic = detect_topic(t)
                                 sess.add("user", t)
 
                         elif ev == "stop":
                             log.info(f"Call ended | turns={sess.turn_count} "
                                      f"in={sess.audio_in} out={sess.audio_out}")
-                            stop.set(); break
+                            stop.set()
+                            break
 
                 except WebSocketDisconnect:
-                    log.info("Exotel disconnected"); stop.set()
+                    log.info("Exotel disconnected")
+                    stop.set()
                 except Exception as e:
-                    log.exception(f"recv: {e}"); stop.set()
+                    log.exception(f"recv: {e}")
+                    stop.set()
 
             async def send():
                 try:
                     async for msg in gs.receive():
-                        if stop.is_set(): break
+                        if stop.is_set():
+                            break
 
                         if msg.server_content and msg.server_content.model_turn:
                             for part in msg.server_content.model_turn.parts:
                                 if part.inline_data and part.inline_data.data:
-                                    raw  = part.inline_data.data
+                                    raw = part.inline_data.data
                                     mime = (part.inline_data.mime_type or "").lower()
                                     out8k = down_16k_to_8k(raw) if "16000" in mime else down_24k_to_8k(raw)
-                                    sess.audio_out  += 1
+                                    sess.audio_out += 1
                                     sess.bot_speaking = True
                                     if sess.stream_sid:
                                         try:
                                             await websocket.send_json({
-                                                "event":      "media",
+                                                "event": "media",
                                                 "stream_sid": sess.stream_sid,
                                                 "media": {"payload": base64.b64encode(out8k).decode()},
                                             })
                                         except Exception as e:
-                                            log.warning(f"WS send: {e}"); stop.set(); return
+                                            log.warning(f"WS send: {e}")
+                                            stop.set()
+                                            return
 
                         if msg.server_content and msg.server_content.turn_complete:
                             sess.bot_speaking = False
@@ -325,12 +367,14 @@ async def voicebot(websocket: WebSocket):
                                     log.info(f"USER: {t[:120]}")
                                     dl = detect_lang(t)
                                     if dl != sess.language:
-                                        log.info(f"Lang auto → {dl}"); sess.language = dl
+                                        log.info(f"Lang auto → {dl}")
+                                        sess.language = dl
                                     sess.topic = detect_topic(t) or sess.topic
                                     sess.add("user", t)
 
                 except Exception as e:
-                    if not stop.is_set(): log.exception(f"send: {e}")
+                    if not stop.is_set():
+                        log.exception(f"send: {e}")
                     stop.set()
 
             await asyncio.gather(recv(), send())
@@ -344,18 +388,20 @@ async def voicebot(websocket: WebSocket):
 @app.get("/health")
 async def health():
     return {
-        "status":      "ok",
-        "model":       MODEL,
-        "server_vad":  "ENABLED — Gemini handles all turn detection",
-        "input_hz":    16000,
-        "output_hz":   24000,
-        "audio":       "continuous stream, no ActivityStart/End",
-        "barge_in":    f"rms>{BARGE_THRESHOLD} for {BARGE_CONFIRM} chunks",
+        "status": "ok",
+        "model": MODEL,
+        "server_vad": "ENABLED — Gemini handles all turn detection",
+        "input_hz": 16000,
+        "output_hz": 24000,
+        "audio": "continuous stream, no ActivityStart/End",
+        "barge_in": f"rms>{BARGE_THRESHOLD} for {BARGE_CONFIRM} chunks",
     }
+
 
 @app.get("/languages")
 async def langs():
     return {k: v["name"] for k, v in LANGUAGE_PROFILES.items()}
+
 
 @app.get("/dtmf")
 async def dtmf():

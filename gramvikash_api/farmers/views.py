@@ -1,18 +1,10 @@
 import os
-import time
-import json
-import hashlib
-import secrets
 import requests
-import xml.etree.ElementTree as ET
 from urllib.parse import urlencode
 
-from django.core.cache import cache
-from django.conf import settings
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import redirect
 
@@ -24,6 +16,7 @@ from firebase_admin import auth
 from core.firebase_init import initialize_firebase
 initialize_firebase()
 
+
 class FirebaseLoginView(APIView):
     """
     Endpoint that receives a Firebase ID Token from React Native,
@@ -34,24 +27,24 @@ class FirebaseLoginView(APIView):
 
     def post(self, request):
         id_token = request.data.get('idToken')
-        
+
         if not id_token:
             return Response({'error': 'No idToken provided'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         try:
             # Verify the token against Firebase
             decoded_token = auth.verify_id_token(id_token)
             phone_number = decoded_token.get('phone_number')
-            
+
             if not phone_number:
                 return Response({'error': 'Token does not contain a phone number'}, status=status.HTTP_400_BAD_REQUEST)
-                
+
             # Get or Create the Farmer
             farmer, created = Farmer.objects.get_or_create(
                 phone_number=phone_number,
-                defaults={'language_preference': 'hi'} # default to Hindi
+                defaults={'language_preference': 'hi'}  # default to Hindi
             )
-            
+
             # Issue JWT
             refresh = RefreshToken.for_user(farmer)
             refresh['farmer_id'] = str(farmer.id)
@@ -65,20 +58,21 @@ class FirebaseLoginView(APIView):
                 "digilocker_linked": farmer.digilocker_linked,
                 "digilocker_aadhaar_name": farmer.digilocker_aadhaar_name
             }
-            
+
             return Response({
                 'message': 'Login successful',
                 "access": str(refresh.access_token),
                 "refresh": str(refresh),
                 'farmer_id': farmer.id,
-                'is_new_farmer': created, # renaming back to new response model
+                'is_new_farmer': created,  # renaming back to new response model
                 'farmer': farmer_data
             }, status=status.HTTP_200_OK)
-            
+
         except auth.InvalidIdTokenError:
             return Response({'error': 'Invalid Firebase ID Token'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class PhoneLoginView(APIView):
     """
@@ -264,28 +258,30 @@ class VerifyOTPView(APIView):
 class DigiLockerAuthURLView(APIView):
     """Generate OAuth URL with farmer_id as state"""
     permission_classes = []
+
     def get(self, request):
         farmer_id = request.query_params.get('farmer_id')
         if not farmer_id:
-             # If using token auth, extract from request.user, but hackathon simplicity allows passing id
-             return Response({'error': 'farmer_id required'}, status=400)
+            # If using token auth, extract from request.user, but hackathon simplicity allows passing id
+            return Response({'error': 'farmer_id required'}, status=400)
 
         client_id = os.getenv('DIGILOCKER_CLIENT_ID')
         if not client_id:
-             return Response({'error': 'DIGILOCKER_CLIENT_ID not configured in backend .env'}, status=500)
-        
+            return Response({'error': 'DIGILOCKER_CLIENT_ID not configured in backend .env'}, status=500)
+
         redirect_uri = request.build_absolute_uri('/api/farmers/digilocker/callback/')
-        
+
         params = {
             'response_type': 'code',
             'client_id': client_id,
             'redirect_uri': redirect_uri,
             'state': farmer_id,
         }
-        
+
         # Official API Setu Sandbox Authorize URL
         auth_url = f"https://dev-meripehchaan.dl6.in/public/oauth2/1/authorize?{urlencode(params)}"
         return Response({"url": auth_url})
+
 
 class DigiLockerCallbackView(APIView):
     """Exchange code for token and fetch User Profile from API Setu Sandbox"""
@@ -293,8 +289,8 @@ class DigiLockerCallbackView(APIView):
 
     def get(self, request):
         code = request.query_params.get('code')
-        state = request.query_params.get('state') # farmer_id
-        
+        state = request.query_params.get('state')  # farmer_id
+
         if not code or not state:
             return Response({'error': 'Invalid callback'}, status=400)
 
@@ -302,7 +298,7 @@ class DigiLockerCallbackView(APIView):
         client_id = os.getenv('DIGILOCKER_CLIENT_ID')
         client_secret = os.getenv('DIGILOCKER_SECRET')
         redirect_uri = request.build_absolute_uri('/api/farmers/digilocker/callback/')
-        
+
         token_url = "https://dev-meripehchaan.dl6.in/public/oauth2/1/token"
         try:
             # Step 1: Token Exchange
@@ -327,19 +323,19 @@ class DigiLockerCallbackView(APIView):
             # Step 2: Fetch User Details (API Setu Account Detail API)
             user_url = "https://dev-meripehchaan.dl6.in/public/oauth2/1/user"
             user_resp = requests.get(
-                user_url, 
+                user_url,
                 headers={'Authorization': f'Bearer {access_token}'},
                 timeout=10
             )
-            
+
             # Simulated/Mock data parsing based on API Setu sandbox "Get User Details" API
             # Usually returns JSON: { "name": "...", "dob": "...", "gender": "...", ... }
             user_data = user_resp.json() if user_resp.status_code == 200 else {}
-            
+
             name = user_data.get('name', 'SURESH KUMAR')
             dob = user_data.get('dob', '15-08-1980')
             gender = user_data.get('gender', 'M')
-            
+
             # API Setu sandbox might provide address fields too
             address = user_data.get('address', {})
             village = address.get('village', 'Rampur')
@@ -358,21 +354,23 @@ class DigiLockerCallbackView(APIView):
             farmer.state = state_str
             farmer.pincode = pincode
             farmer.save()
-            
+
             # Redirect to React Native App Deep Link
             return redirect(f"gramvikash://digilocker/success?farmer_id={state}")
-            
+
         except Exception as e:
             # Fallback redirect to app with error
             return redirect(f"gramvikash://digilocker/error?message={str(e)}")
 
+
 class DigiLockerStatusView(APIView):
     permission_classes = []
+
     def get(self, request):
         farmer_id = request.query_params.get('farmer_id')
         if not farmer_id:
             return Response({'error': 'farmer_id required'}, status=400)
-            
+
         try:
             farmer = Farmer.objects.get(id=farmer_id)
             return Response({

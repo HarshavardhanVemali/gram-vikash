@@ -28,12 +28,14 @@ BUCKET_NAME = settings.AWS_STORAGE_BUCKET_NAME
 gemini_api_key = os.getenv('EXPO_PUBLIC_GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
 ai_client = genai.Client(api_key=gemini_api_key)
 
+
 def detect_language_code(text):
     try:
         lang = langdetect.detect(text)
         return lang if lang in ['hi', 'te', 'ta', 'mr', 'bn', 'gu', 'kn', 'ml', 'en', 'ur'] else 'hi'
-    except:
-        return 'hi' # default fallback
+    except Exception:
+        return 'hi'  # default fallback
+
 
 @shared_task
 def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code_hint='hi'):
@@ -41,19 +43,19 @@ def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code
     Background job to diagnose crop disease using Gemini Vision.
     """
     logger.info(f"Starting crop diagnosis task: {task_id} for farmer: {farmer_id}")
-    
+
     redis_key = f"ctask:{task_id}"
     cache.set(redis_key, json.dumps({"status": "processing"}), timeout=600)
-    
+
     with tempfile.TemporaryDirectory() as temp_dir:
         input_image_path = os.path.join(temp_dir, f"input_{task_id}.jpg")
         output_audio_path = os.path.join(temp_dir, f"output_{task_id}.mp3")
-        
+
         try:
             # 1. Download Input Image from S3
             logger.info(f"Downloading {s3_key} from S3...")
             s3_client.download_file(BUCKET_NAME, s3_key, input_image_path)
-            
+
             # 2. Call Gemini Vision
             logger.info("Calling Gemini 1.5 Flash (Vision)...")
             with open(input_image_path, 'rb') as f:
@@ -67,9 +69,9 @@ def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code
             prompt = f"""
             You are FASALDOC, an expert agricultural AI assistant and plant pathologist.
             Analyze this image of a {(crop_type_hint if crop_type_hint else 'crop')}.
-            
+
             Identify any disease, pest, or nutrient deficiency.
-            
+
             Provide the response STRICTLY as a JSON object matching this exact schema:
             {{
               "crop_type": "Identified crop name in English",
@@ -93,11 +95,11 @@ def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code
                     response_mime_type="application/json",
                 )
             )
-            
+
             # Parse Gemini Output
             try:
                 result_data = json.loads(response.text)
-                
+
                 # Check for bad imagery
                 if result_data.get('image_quality') in ['unclear', 'not_a_crop']:
                     final_result = {
@@ -107,15 +109,15 @@ def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code
                     }
                     cache.set(redis_key, json.dumps(final_result), timeout=3600)
                     return
-                
+
                 # Retrieve Farmer
                 farmer = Farmer.objects.get(id=farmer_id)
-                
+
                 # 3. Save to database
                 db_scan = CropScan.objects.create(
-                    id=task_id, # Link UUID
+                    id=task_id,  # Link UUID
                     farmer=farmer,
-                    image_url=get_presigned_url(s3_key), # Get temp URL for DB viewing
+                    image_url=get_presigned_url(s3_key),  # Get temp URL for DB viewing
                     crop_type=result_data.get('crop_type', ''),
                     disease_name=result_data.get('disease_name', ''),
                     disease_name_local=result_data.get('disease_name_local', ''),
@@ -127,7 +129,7 @@ def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code
                     needs_expert=result_data.get('needs_expert', False),
                     image_quality=result_data.get('image_quality', 'good')
                 )
-                
+
                 # 4. Generate TTS Audio Summary
                 logger.info("Generating FASALDOC TTS summary...")
                 disease_local = result_data.get('disease_name_local', '')
@@ -139,34 +141,34 @@ def diagnose_crop_task(task_id, s3_key, farmer_id, crop_type_hint, language_code
                     ai_response_text = "Aapki fasal swasth lag rahi hai!"
                 else:
                     ai_response_text = f"Mausambi mein {disease_local} hone ki sambhavna hai. {treatment_short}"
-                
+
                 # Dynamic translation detection to ensure audio matches output text
                 lang_code = detect_language_code(ai_response_text)
                 tts = gTTS(text=ai_response_text, lang=lang_code, slow=False)
                 tts.save(output_audio_path)
-                
+
                 # Upload Output Audio to S3
                 output_s3_key = f"voice/output/crops/{farmer_id}/{task_id}.mp3"
                 logger.info(f"Uploading TTS to S3: {output_s3_key}")
                 upload_success = upload_file_to_s3(output_audio_path, output_s3_key)
-                
+
                 if not upload_success:
                     logger.error("Failed to upload TTS audio to S3, proceeding without voice.")
                     audio_url = None
                 else:
                     audio_url = get_presigned_url(output_s3_key)
-                
+
                 # 5. Mark Task Done in Redis
                 result_data['status'] = 'done'
                 result_data['audio_url'] = audio_url
-                result_data['s3_image_url'] = db_scan.image_url # Optional for frontend display
-                
-                cache.set(redis_key, json.dumps(result_data), timeout=3600) # Cache for 1 hour
+                result_data['s3_image_url'] = db_scan.image_url  # Optional for frontend display
+
+                cache.set(redis_key, json.dumps(result_data), timeout=3600)  # Cache for 1 hour
                 logger.info(f"Crop task {task_id} complete.")
-                
+
             except json.JSONDecodeError:
                 raise Exception("Failed to parse Gemini JSON output")
-                
+
         except Exception as e:
             logger.exception(f"Error processing crop task {task_id}: {e}")
             error_result = {

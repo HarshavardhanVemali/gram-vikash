@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+from datetime import timedelta
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -24,13 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# Generate a new one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+# Generate a new one with: python -c "from django.core.management.utils
+# import get_random_secret_key; print(get_random_secret_key())"
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-REPLACE-THIS-IN-PRODUCTION")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = ['*'] # For hackathon demo
+ALLOWED_HOSTS = ['*']  # For hackathon demo
 
 
 # Application definition
@@ -149,7 +151,6 @@ REST_FRAMEWORK = {
 }
 
 # Simple JWT Configuration
-from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=7),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
@@ -157,7 +158,6 @@ SIMPLE_JWT = {
 }
 
 # Caching with Redis for OTP
-import os
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",

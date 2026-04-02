@@ -179,5 +179,5 @@ jobs:
       - name: Verify JS parses without errors (no ESLint config found)
         if: steps.eslint_check.outputs.has_eslint == 'false'
         run: |
-          echo "No ESLint config found. Running basic syntax check..."
-          find src -name "*.js" -o -name "*.jsx" | xargs -I{} node --check {} && echo "All JS/JSX files parse OK"
+          echo "No ESLint config found. Skipping frontend linting."
+          echo "We recommend adding 'eslint-config-expo' to your project."

@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from farmers.models import Farmer
 
+
 class EmergencyLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farmer = models.ForeignKey(Farmer, on_delete=models.CASCADE, related_name='emergencies')
