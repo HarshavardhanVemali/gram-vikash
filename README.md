@@ -11,7 +11,7 @@
 [![Expo](https://img.shields.io/badge/Expo-SDK%2054-000020.svg)](https://expo.dev)
 [![Gemini](https://img.shields.io/badge/Powered%20by-Gemini%20AI-4285F4.svg)](https://ai.google.dev)
 
-[Features](#features) * [Architecture](#architecture) * [Detailed Tech Stack](#detailed-tech-stack) * [API Integration Roster](#api-integration-roster) * [Getting Started](#getting-started) * [Support](#support)
+[Features](#features)  [Architecture](#architecture)  [Detailed Tech Stack](#detailed-tech-stack)  [API Integration Roster](#api-integration-roster)  [Getting Started](#getting-started)  [Support](#support)
 
 </div>
 
