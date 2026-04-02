@@ -13,9 +13,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.core.cache import cache
 from .models import CropScan
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.core.cache import cache
 
 from core.tasks import upload_file_to_s3
 from .tasks import diagnose_crop_task
