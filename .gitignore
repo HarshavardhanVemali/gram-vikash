@@ -1,0 +1,19 @@
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Environment/Cache
+venv/
+env/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Credentials
+firebase_admin_sdk.json
+ngrok.yml
+google-services.json
+
+# Local configurations
+docker-compose.override.yml

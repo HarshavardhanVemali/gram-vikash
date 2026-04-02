@@ -1,0 +1,15 @@
+# Environment Variables
+.env
+*.env
+
+# Credentials
+firebase_admin_sdk.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+
+# SQLite
+db.sqlite3
