@@ -1,7 +1,7 @@
 Django>=5.2.12
 djangorestframework==3.15.2
 psycopg2-binary==2.9.10
-celery==5.4.0
+celery==5.6.3
 redis==7.4.0
 gunicorn==23.0.0
 django-cors-headers==4.6.0
